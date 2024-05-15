@@ -6,6 +6,9 @@ $dataDisksCollection = @()
 $sourceSubId = ""
 $destSubId = ""
 
+$location = "eastus2"
+
+
 #Connect to Account
 Connect-AzAccount
 
@@ -48,7 +51,9 @@ foreach($dataDisk in $vms){
 Set-AzContext -Subscription $destSubId
 
 
-New-AzResourceGroup -Name $snapshotRG -Location "uksouth"
+New-AzResourceGroup -Name $snapshotRG -Location $location
+
+#OS Disk Snapshot Config & Create
 
 foreach($vm in $osDisksCollection){
     $snapshot = New-AzSnapshotConfig -SourceUri $vm.osDiskId -Location $vm.location -CreateOption copy
@@ -58,6 +63,8 @@ foreach($vm in $osDisksCollection){
 }
 
 
+#Data Disk Snapshot Config & Create
+
 foreach($disks in $dataDisksCollection){
     foreach($disk in $disks.dataDisks){
         $snapshot = New-AzSnapshotConfig -SourceUri $disk.ManagedDisk.Id -Location $disks.location -CreateOption Copy 
@@ -65,6 +72,7 @@ foreach($disks in $dataDisksCollection){
     }
 }
 
+#OS Disk Snapshot Get, Disk Config, Disk Create & OS Disk Info Export
 
 foreach($osDiskSnapshot in $osDisksCollection){
 
@@ -86,6 +94,8 @@ foreach($osDiskSnapshot in $osDisksCollection){
 
 }
 
+
+#Data Disk Snapshot Get, Disk Config, Disk Create & Data Disk Info Export
 
 foreach($dataDiskSnapshot in $dataDisksCollection){
 
@@ -110,6 +120,10 @@ foreach($dataDiskSnapshot in $dataDisksCollection){
     }  
 }
 
+#Left to do
 
+# 1. Create VM Config 
+# 2. Attach OS Disks 
+# 3. Attach Data Disks
 
 
