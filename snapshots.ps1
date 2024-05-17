@@ -13,9 +13,12 @@ $sharedDataDisksQueryFiltCollection = @()
 $config = @()
 $ipConfigurations =@()
 
+$secretCollection = @()
+
 $nicCreateCollection = @()
 
-$keyVaultName = ""
+$destKeyVaultName = ""
+$sourceKeyVaultName = ""
 
 $sourceSubId = ""
 $destSubId = ""
@@ -35,7 +38,7 @@ $snapshotRG = "rg-Snapshots"
 
 $dataDisksQuery = Get-AzDisk
 
-
+# Get OS Disk Information from VMs
 foreach($osDisk in $vms){
     $osDisksCollection += [pscustomobject]@{
         osDiskName = $osDisk.StorageProfile.OsDisk.Name 
@@ -51,7 +54,7 @@ foreach($osDisk in $vms){
 
 
 
-
+# Get Unshared Data Disk Information from VMs
 foreach($dataDisk in $vms){
 
     foreach($diskInfo in $dataDisk.storageProfile.dataDisks){
@@ -75,6 +78,7 @@ foreach($dataDisk in $vms){
 }
 
 
+# Gets Shared Data Disk Information from Disks
 foreach($sharedDataDisks in $dataDisksQuery){
 
     if($sharedDataDisks.ManagedBy -notmatch "aks" -And($sharedDataDisks.Name -notmatch "OsDisk") -and($null -ne $sharedDataDisks.MaxShares)){
@@ -92,6 +96,70 @@ foreach($sharedDataDisks in $dataDisksQuery){
         }
     }
 }
+
+
+#Key Vault Source Retrieve
+$sourceKeyvault= Get-AzKeyVault -VaultName $sourceKeyVaultName
+$sourceKeyvaultId = $sourceKeyvault.ResourceId
+
+
+
+#Key Vault Secret Retrieve
+#$secrets = Get-AzKeyVaultSecret -ResourceId $sourceKeyvaultId | Select *
+$secretProperties= Get-AzKeyVaultSecret -VaultName $sourceKeyVaultName
+
+foreach($secret in $secretProperties){
+
+    $secretfullProperties = Get-AzKeyVaultSecret -Vault $sourceKeyVaultName -Name $secret.Name
+
+    $secretValue = $secretfullProperties.SecretValue
+
+    if($secretfullProperties.Name -match "ra001" -or($secretfullProperties.Name -match "star-pasngr") -or($secretfullProperties.Name -match "ra002")){
+        $secretName = "$($secret.Name)-migrated" 
+    }
+    else {
+        $secretName = $secretfullProperties.Name
+    }
+
+
+    $secretCollection += [PSCustomObject]@{
+        Name = $secretName #$secretfullProperties.Name
+        vaultName = $destKeyVaultName
+        secretValue = $secretValue
+    }
+}
+
+
+
+#Set context to dest sub
+Set-AzContext -Subscription $destSubId
+
+#Key Vault Destination Retrieve
+$destKeyVault = Get-AzKeyVault -VaultName $destKeyVaultName
+$destkeyvaultId = $destKeyVault.ResourceId
+
+foreach($secretCollectionitem in $secretCollection){
+    
+    Set-AzKeyVaultSecret -VaultName $secretCollectionitem.vaultName -Name $secretCollectionitem.Name -SecretValue $secretCollectionitem.secretValue
+
+}
+
+
+    
+
+
+# $adminPassword = $secret.SecretValue
+# $securePassword = ConvertTo-SecureString $adminPassword -AsPlainText -Force
+# $adminCredential = New-Object System.Management.Automation.PSCredential ("localadmin", $securePassword)
+
+# $linuxSecretName = "$($vmConfigCollection.VMName)-localadmin-ssh-private-key"
+# $linuxSecret = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $linuxSecretName
+# $linuxAdminPassword = $linuxSecret.SecretValue
+# $linuxSecurePassword = ConvertTo-SecureString $linuxAdminPassword -AsPlainText -Force
+# $linuxAdminCredential = New-Object System.Management.Automation.PSCredential ("localadmin", $linuxSecurePassword)
+
+
+
 
 # Switch to the destination subscription
 Write-Output "Switching to destination subscription: $destSubId"
@@ -285,7 +353,7 @@ foreach($dataDiskSharedSnapshot in $sharedDataDisksQueryFiltCollection){
 
     $dataSharedDisksSnapshotObject= New-AzDiskConfig -SkuName $dataDiskSharedSnapshot.StorageAccountType -Location $shareddatadisksnapshotInfo.Location  -CreateOption $datadisksnapshotInfo.CreationData.CreateOption -SourceResourceId $datadisksnapshotInfo.Id -DiskSizeGB $datadisksnapshotInfo.DiskSizeGB -MaxSharesCount $dataDiskSharedSnapshot.MaxShares -Tier $dataDiskSharedSnapshot.tier
 
-    $dataDiskCreate = New-AzDisk -Disk $dataSharedDisksSnapshotObject -ResourceGroupName "rg-15b-sql-uat-eus2-01"  <#$dataDiskSharedSnapshot.resourceGroup#> -DiskName $shareddatadisksnapshotInfo.Name -Verbose
+    $dataDiskCreate = New-AzDisk -Disk $dataSharedDisksSnapshotObject -ResourceGroupName $dataDiskSharedSnapshot.resourceGroup -DiskName $shareddatadisksnapshotInfo.Name -Verbose
 
     $newNonSharedDataDisksCreated = [pscustomobject]@{
         vmName = $dataDiskSnapshot.VMName
