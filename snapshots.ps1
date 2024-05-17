@@ -283,7 +283,7 @@ foreach($dataDiskSharedSnapshot in $sharedDataDisksQueryFiltCollection){
 
     $shareddatadisksnapshotInfo = Get-AzSnapshot -ResourceGroupName $snapshotRG -Name $dataDiskSharedSnapshot.Name
 
-    $dataSharedDisksSnapshotObject= New-AzDiskConfig -SkuName $dataDiskSharedSnapshot.StorageAccountType -Location $shareddatadisksnapshotInfo.Location  -CreateOption $datadisksnapshotInfo.CreationData.CreateOption -SourceResourceId $datadisksnapshotInfo.Id -DiskSizeGB $datadisksnapshotInfo.DiskSizeGB
+    $dataSharedDisksSnapshotObject= New-AzDiskConfig -SkuName $dataDiskSharedSnapshot.StorageAccountType -Location $shareddatadisksnapshotInfo.Location  -CreateOption $datadisksnapshotInfo.CreationData.CreateOption -SourceResourceId $datadisksnapshotInfo.Id -DiskSizeGB $datadisksnapshotInfo.DiskSizeGB -MaxSharesCount $dataDiskSharedSnapshot.MaxShares -Tier $dataDiskSharedSnapshot.tier
 
     $dataDiskCreate = New-AzDisk -Disk $dataSharedDisksSnapshotObject -ResourceGroupName "rg-15b-sql-uat-eus2-01"  <#$dataDiskSharedSnapshot.resourceGroup#> -DiskName $shareddatadisksnapshotInfo.Name -Verbose
 
@@ -297,9 +297,6 @@ foreach($dataDiskSharedSnapshot in $sharedDataDisksQueryFiltCollection){
     }
     
 }
-
-
-
 
 
 foreach($vmconfig in $vms){
@@ -475,7 +472,7 @@ foreach($vmconfig in $vms){
         Location = $vmconfig.Location
         VM = $config
     }
-    
+
     #VM Creation 
     New-AzVM @vmParams
 }
