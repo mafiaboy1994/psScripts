@@ -1,6 +1,6 @@
 
 $osDisksCollection = @()
-
+$rgCollection =@()
 $dataDisksSharedSourceCollection = @()
 $dataDisksNSSourceCollection = @()
 
@@ -9,6 +9,7 @@ $vmConfigCollection = @()
 $ipConfigCollection = @()
 $dataDiskRefCollection = @()
 $duplicatedDisksRemovedCollection = @()
+
 $sharedDataDisksQueryFiltCollection = @()
 $config = @()
 $ipConfigurations =@()
@@ -77,6 +78,14 @@ foreach($dataDisk in $vms){
     }
 }
 
+#Gets RG Information from VMs
+foreach($rgs in $vms){
+    $rgCollection += [PSCustomObject]@{
+        name = $rgs.ResourceGroupName
+    }
+}
+
+
 
 # Gets Shared Data Disk Information from Disks
 foreach($sharedDataDisks in $dataDisksQuery){
@@ -96,6 +105,8 @@ foreach($sharedDataDisks in $dataDisksQuery){
         }
     }
 }
+
+
 
 
 #Key Vault Source Retrieve
@@ -167,6 +178,14 @@ Select-AzSubscription -SubscriptionId $destSubId
 
 New-AzResourceGroup -Name $snapshotRG -Location $location
 
+
+#RG VM Creation
+
+$rgCollectionUnique = $rgCollection | Select-Object name -Unique
+
+foreach($uniqueRG in $rgCollectionUnique){
+    New-AzResourceGroup -Name $uniqueRG.name -Location $location
+}
 
 
 #OS Disk Snapshot Config & Create
