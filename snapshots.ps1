@@ -16,6 +16,23 @@ param (
 )
 
 
+if (-not $sourceKeyVaultName) {
+    $sourceKeyVaultName = Read-Host -Prompt 'Enter the Source Key Vault Name'
+}
+if (-not $destKeyVaultName) {
+    $destKeyVaultName = Read-Host -Prompt 'Enter the Destination Key Vault Name'
+}
+if (-not $sourceSubId) {
+    $sourceSubId = Read-Host -Prompt 'Enter the Source Subscription ID'
+}
+if (-not $destSubId) {
+    $destSubId = Read-Host -Prompt 'Enter the Destination Subscription ID'
+}
+if (-not $location) {
+    $location = Read-Host -Prompt 'Enter the Location'
+}
+
+
 
 
 $osDisksCollection = @()
