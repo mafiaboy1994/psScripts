@@ -4,27 +4,31 @@ $rgCollection =@()
 $dataDisksSharedSourceCollection = @()
 $dataDisksNSSourceCollection = @()
 
+$sharedDataDisksQueryFiltCollection = @()
+
 $nicCollection = @()
 $vmConfigCollection = @()
 $ipConfigCollection = @()
 $dataDiskRefCollection = @()
-$duplicatedDisksRemovedCollection = @()
-
-$sharedDataDisksQueryFiltCollection = @()
+$subnet = @()
 $config = @()
 $ipConfigurations =@()
+$nicCreateCollection = @()
+
+$ipSettingsCreate = @()
+
+$sqlDBVMs = @()
+
 
 $secretCollection = @()
 
-$nicCreateCollection = @()
-
-$destKeyVaultName = ""
 $sourceKeyVaultName = ""
+$destKeyVaultName = ""
 
 $sourceSubId = ""
 $destSubId = ""
 
-$location = "eastus2"
+$location = ""
 
 
 #Connect to Account
@@ -44,12 +48,12 @@ foreach($osDisk in $vms){
     $osDisksCollection += [pscustomobject]@{
         osDiskName = $osDisk.StorageProfile.OsDisk.Name 
         osDiskId = $osDisk.StorageProfile.OsDisk.ManagedDisk.Id
-        DiskSizeGB = $osDisk.StorageProfile.OsDisk.DiskSizeGB
+        DiskSizeGB = (Get-AzDisk -Name $osDisk.StorageProfile.OsDisk.Name).DiskSizeGB #$osDisk.StorageProfile.OsDisk.DiskSizeGB
         VMName = $osDisk.Name
         vmId = $osDisk.id
         resourceGroup = $osDisk.ResourceGroupName
         location = $osDisk.Location
-        storageAccountType = $osDisk.StorageProfile.OsDisk.ManagedDisk.StorageAccountType
+        storageAccountType = (Get-AzDisk -Name $osDisk.StorageProfile.OsDisk.Name).Sku.Name #$osDisk.StorageProfile.OsDisk.ManagedDisk.StorageAccountType
     }
 }
 
@@ -66,17 +70,21 @@ foreach($dataDisk in $vms){
                 Name = $diskName
                 location = $dataDisk.Location
                 VMName = $dataDisk.Name
-                DiskSizeGB = $diskInfo.DiskSizeGB
+                DiskSizeGB = (Get-AzDisk -Name $diskInfo.name).DiskSizeGB
                 resourceGroup = $dataDisk.ResourceGroupName
                 #diskId = "/subscriptions/$($destSubId)/resourceGroups/$($dataDisk.ResourceGroupName)/providers/Microsoft.Compute/disks/$($diskIdRaw)"
                 sourceDiskId = $diskInfo.ManagedDisk.Id
                 tier = (Get-AzDisk -Name $diskInfo.Name).Tier 
-                storageAccountType = $diskInfo.ManagedDisk.StorageAccountType
+                storageAccountType = (Get-AzDisk -Name $diskInfo.Name).Sku.Name #$diskInfo.ManagedDisk.StorageAccountType
                 MaxShares = $maxSharesCheck
             }  
         }
     }
 }
+
+
+
+
 
 #Gets RG Information from VMs
 foreach($rgs in $vms){
@@ -111,7 +119,7 @@ foreach($sharedDataDisks in $dataDisksQuery){
 
 #Key Vault Source Retrieve
 $sourceKeyvault= Get-AzKeyVault -VaultName $sourceKeyVaultName
-$sourceKeyvaultId = $sourceKeyvault.ResourceId
+#$sourceKeyvaultId = $sourceKeyvault.ResourceId
 
 
 
@@ -125,12 +133,14 @@ foreach($secret in $secretProperties){
 
     $secretValue = $secretfullProperties.SecretValue
 
-    if($secretfullProperties.Name -match "ra001" -or($secretfullProperties.Name -match "star-pasngr") -or($secretfullProperties.Name -match "ra002")){
-        $secretName = "$($secret.Name)-migrated" 
-    }
-    else {
-        $secretName = $secretfullProperties.Name
-    }
+    $secretName = $secretfullProperties.Name
+
+    # if($secretfullProperties.Name -match "ra001" -or($secretfullProperties.Name -match "star-pasngr") -or($secretfullProperties.Name -match "ra002")){
+    #     $secretName = "$($secret.Name)-migrated" 
+    # }
+    # else {
+    #     $secretName = $secretfullProperties.Name
+    # }
 
 
     $secretCollection += [PSCustomObject]@{
@@ -147,29 +157,13 @@ Set-AzContext -Subscription $destSubId
 
 #Key Vault Destination Retrieve
 $destKeyVault = Get-AzKeyVault -VaultName $destKeyVaultName
-$destkeyvaultId = $destKeyVault.ResourceId
+#$destkeyvaultId = $destKeyVault.ResourceId
 
 foreach($secretCollectionitem in $secretCollection){
     
     Set-AzKeyVaultSecret -VaultName $secretCollectionitem.vaultName -Name $secretCollectionitem.Name -SecretValue $secretCollectionitem.secretValue
 
 }
-
-
-    
-
-
-# $adminPassword = $secret.SecretValue
-# $securePassword = ConvertTo-SecureString $adminPassword -AsPlainText -Force
-# $adminCredential = New-Object System.Management.Automation.PSCredential ("localadmin", $securePassword)
-
-# $linuxSecretName = "$($vmConfigCollection.VMName)-localadmin-ssh-private-key"
-# $linuxSecret = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $linuxSecretName
-# $linuxAdminPassword = $linuxSecret.SecretValue
-# $linuxSecurePassword = ConvertTo-SecureString $linuxAdminPassword -AsPlainText -Force
-# $linuxAdminCredential = New-Object System.Management.Automation.PSCredential ("localadmin", $linuxSecurePassword)
-
-
 
 
 # Switch to the destination subscription
@@ -210,24 +204,27 @@ foreach($vm in $osDisksCollection){
     $sourceDisk = Get-AzDisk -ResourceGroupName $vm.resourceGroup -DiskName $vm.osDiskName
     $sourceDiskId = $sourceDisk.Id
 
-    $snapshotConfig = New-AzSnapshotConfig -SourceUri $vm.osDiskId -Location $vm.location -CreateOption copy  -SkuName $storageAccountType
+    $snapshotConfig = New-AzSnapshotConfig -SourceResourceId $vm.osDiskId -Location $vm.location -CreateOption copy  -SkuName $storageAccountType -DiskSizeGB $vm.DiskSizeGB
 
     # Debugging output for snapshot configuration
     Write-Output "Snapshot configuration created: $($snapshotConfig | ConvertTo-Json -Depth 10)"
 
-     # Switch to the destination subscription
-     Write-Output "Switching to destination subscription: $destSubId"
-     Select-AzSubscription -SubscriptionId $destSubId
+    # Switch to the destination subscription
+    Write-Output "Switching to destination subscription: $destSubId"
+    Select-AzSubscription -SubscriptionId $destSubId
 
-    New-AzSnapshot -Snapshot $snapshot -SnapshotName "new$($vm.osDiskName)" -ResourceGroupName $snapshotRG
+    # Create the snapshot using the configuration in the destination subscription
+    $snapshotCreate = New-AzSnapshot -Snapshot $snapshotConfig -SnapshotName "snapshot-$($vm.osDiskName)" -ResourceGroupName $snapshotRG
 
-     # Create the snapshot using the configuration in the destination subscription
-     $snapshotCreate = New-AzSnapshot -ResourceGroupName $snapshotRG -SnapshotName $vm.osDiskName -Snapshot $snapshotConfig
+     
 
-     # Output snapshot creation result
-     Write-Output "Snapshot created with ID: $($snapshotCreate.Id)"
+    # Output snapshot creation result
+    Write-Output "Snapshot created with ID: $($snapshotCreate.Id)"
 
 }
+
+
+
 
 
 # Data Disks Shared Disk Snapshot Creation
@@ -259,8 +256,8 @@ foreach($disks in $sharedDataDisksQueryFiltCollection){
 
 
     # Create the snapshot configuration in the source subscription
-    $snapshotConfig = New-AzSnapshotConfig -SourceResourceId $sourceDiskId -Location $disks.location -CreateOption Copy -SkuName $storageAccountType 
-
+    $snapshotConfig = New-AzSnapshotConfig -SourceResourceId $sourceDiskId -Location $disks.location -CreateOption Copy -SkuName $storageAccountType -DiskSizeGB $disks.DiskSizeGB
+    
     # Debugging output for snapshot configuration
     Write-Output "Snapshot configuration created: $($snapshotConfig | ConvertTo-Json -Depth 10)"
     
@@ -269,9 +266,8 @@ foreach($disks in $sharedDataDisksQueryFiltCollection){
     Select-AzSubscription -SubscriptionId $destSubId
 
     
-
     # Create the snapshot using the configuration in the destination subscription
-    $snapshotCreate = New-AzSnapshot -ResourceGroupName $snapshotRG -SnapshotName $disks.Name -Snapshot $snapshotConfig
+    $snapshotCreate = New-AzSnapshot -ResourceGroupName $snapshotRG -SnapshotName "snapshot-$($disks.Name)" -Snapshot $snapshotConfig
 
     # Output snapshot creation result
     Write-Output "Snapshot created with ID: $($snapshotCreate.Id)"
@@ -305,7 +301,7 @@ foreach($nonSharedDisks in $dataDisksNSSourceCollection){
     $sourceDiskId = $sourceDisk.Id
 
 
-    $snapshot = New-AzSnapshotConfig -SourceUri $nonSharedDisks.sourceDiskId -Location $nonSharedDisks.location -CreateOption Copy -SkuName $storageAccountType
+    $snapshot = New-AzSnapshotConfig -SourceResourceId $nonSharedDisks.sourceDiskId -Location $nonSharedDisks.location -CreateOption Copy -SkuName $storageAccountType -DiskSizeGB $nonSharedDisks.DiskSizeGB
 
    # Switch to the dest subscription
    Write-Output "Switching to dest subscription: $destSubId"
@@ -313,18 +309,26 @@ foreach($nonSharedDisks in $dataDisksNSSourceCollection){
 
 
 
-    New-AzSnapshot -Snapshot $snapshot -SnapshotName $nonSharedDisks -ResourceGroupName $snapshotRG
+    # Create the snapshot using the configuration in the destination subscription
+    $snapshotCreate = New-AzSnapshot -ResourceGroupName $snapshotRG -SnapshotName "snapshot-$($nonSharedDisks.Name)" -Snapshot $snapshot
+
+    # Output snapshot creation result
+    Write-Output "Snapshot created with ID: $($snapshotCreate.Id)"
 }
+
+
+
+
 
 #OS Disk Snapshot Get, Disk Config, Disk Create & OS Disk Info Export
 
 foreach($osDiskSnapshot in $osDisksCollection){
 
-    $snapshotInfo = Get-AzSnapshot -ResourceGroupName $snapshotRG -Name "new$($osDiskSnapshot.osDiskName)"
+    $snapshotInfo = Get-AzSnapshot -ResourceGroupName $snapshotRG -Name "snapshot-$($osDiskSnapshot.osDiskName)"
 
     $disksSnapshotObject= New-AzDiskConfig -SkuName $osDiskSnapshot.storageAccountType -Location $snapshotInfo.Location  -CreateOption $snapshotInfo.CreationData.CreateOption -SourceResourceId $snapshotInfo.Id -DiskSizeGB $snapshotInfo.DiskSizeGB
 
-    $osDiskCreate = New-AzDisk -Disk $disksSnapshotObject -ResourceGroupName $osDiskSnapshot.resourceGroup -DiskName $snapshotInfo.Name -Verbose
+    $osDiskCreate = New-AzDisk -Disk $disksSnapshotObject -ResourceGroupName $osDiskSnapshot.resourceGroup -DiskName $osDiskSnapshot.osDiskName -verbose #$snapshotInfo.Name -Verbose
 
 
     $newdOsDisksCreated = [pscustomobject]@{
@@ -338,7 +342,27 @@ foreach($osDiskSnapshot in $osDisksCollection){
 
 }
 
+#Data Disk  Shared Disks Snapshot Get, Disk Config, Disk Create & Data Disk Info Export
 
+foreach($dataDiskSharedSnapshot in $sharedDataDisksQueryFiltCollection){
+
+
+    $shareddatadisksnapshotInfo = Get-AzSnapshot -ResourceGroupName $snapshotRG -Name "snapshot-$($dataDiskSharedSnapshot.Name)"
+
+    $dataSharedDisksSnapshotObject= New-AzDiskConfig -SkuName $dataDiskSharedSnapshot.StorageAccountType -Location $shareddatadisksnapshotInfo.Location  -CreateOption $shareddatadisksnapshotInfo.CreationData.CreateOption -SourceResourceId $shareddatadisksnapshotInfo.Id -DiskSizeGB $shareddatadisksnapshotInfo.DiskSizeGB -MaxSharesCount $dataDiskSharedSnapshot.MaxShares # -Tier $dataDiskSharedSnapshot.storageAccountType
+
+    $dataDiskCreate = New-AzDisk -Disk $dataSharedDisksSnapshotObject -ResourceGroupName $dataDiskSharedSnapshot.resourceGroup -DiskName $dataDiskSharedSnapshot.Name -Verbose
+
+    $newNonSharedDataDisksCreated = [pscustomobject]@{
+        vmName = $dataDiskSnapshot.VMName
+        DiskSizeGB = $dataDiskCreate.DiskSizeGB
+        name = $dataDiskCreate.Name 
+        id = $dataDiskCreate.Id
+        resourceGroup = $dataDiskCreate.ResourceGroupName
+        location = $dataDiskCreate.Location
+    }
+    
+}
 
 
 #Data Disk Non Shared Disks Snapshot Get, Disk Config, Disk Create & Data Disk Info Export
@@ -346,11 +370,11 @@ foreach($osDiskSnapshot in $osDisksCollection){
 foreach($dataDiskNonSharedSnapshot in $dataDisksNSSourceCollection){
 
 
-    $datadisksnapshotInfo = Get-AzSnapshot -ResourceGroupName $snapshotRG -Name "new$($dataDiskNonSharedSnapshot.Name)"
+    $datadisksnapshotInfo = Get-AzSnapshot -ResourceGroupName $snapshotRG -Name "snapshot-$($dataDiskNonSharedSnapshot.Name)"
 
     $dataNonSharedDisksSnapshotObject= New-AzDiskConfig -SkuName $dataDiskNonSharedSnapshot.StorageAccountType -Location $datadisksnapshotInfo.Location  -CreateOption $datadisksnapshotInfo.CreationData.CreateOption -SourceResourceId $datadisksnapshotInfo.Id -DiskSizeGB $datadisksnapshotInfo.DiskSizeGB
 
-    $dataDiskCreate = New-AzDisk -Disk $dataNonSharedDisksSnapshotObject -ResourceGroupName $dataDiskNonSharedSnapshot.resourceGroup -DiskName $datadisksnapshotInfo.Name -Verbose
+    $dataDiskCreate = New-AzDisk -Disk $dataNonSharedDisksSnapshotObject -ResourceGroupName $dataDiskNonSharedSnapshot.resourceGroup -DiskName $dataDiskNonSharedSnapshot.Name -Verbose
 
     $newNonSharedDataDisksCreated = [pscustomobject]@{
         vmName = $dataDiskSnapshot.VMName
@@ -363,30 +387,13 @@ foreach($dataDiskNonSharedSnapshot in $dataDisksNSSourceCollection){
     
 }
 
-#Data Disk  Shared Disks Snapshot Get, Disk Config, Disk Create & Data Disk Info Export
-
-foreach($dataDiskSharedSnapshot in $sharedDataDisksQueryFiltCollection){
-
-
-    $shareddatadisksnapshotInfo = Get-AzSnapshot -ResourceGroupName $snapshotRG -Name $dataDiskSharedSnapshot.Name
-
-    $dataSharedDisksSnapshotObject= New-AzDiskConfig -SkuName $dataDiskSharedSnapshot.StorageAccountType -Location $shareddatadisksnapshotInfo.Location  -CreateOption $datadisksnapshotInfo.CreationData.CreateOption -SourceResourceId $datadisksnapshotInfo.Id -DiskSizeGB $datadisksnapshotInfo.DiskSizeGB -MaxSharesCount $dataDiskSharedSnapshot.MaxShares -Tier $dataDiskSharedSnapshot.tier
-
-    $dataDiskCreate = New-AzDisk -Disk $dataSharedDisksSnapshotObject -ResourceGroupName $dataDiskSharedSnapshot.resourceGroup -DiskName $shareddatadisksnapshotInfo.Name -Verbose
-
-    $newNonSharedDataDisksCreated = [pscustomobject]@{
-        vmName = $dataDiskSnapshot.VMName
-        DiskSizeGB = $diskCdataDiskCreatereate.DiskSizeGB
-        name = $dataDiskCreate.Name 
-        id = $dataDiskCreate.Id
-        resourceGroup = $dataDiskCreate.ResourceGroupName
-        location = $dataDiskCreate.Location
-    }
-    
-}
 
 
 foreach($vmconfig in $vms){
+
+    # Switch to the destination subscription
+    Write-Output "Switching to destination subscription: $sourcesubId"
+    Select-AzSubscription -SubscriptionId $sourcesubId
 
     $nicCleanup = $vmconfig.NetworkProfile.NetworkInterfaces
 
@@ -435,6 +442,10 @@ foreach($vmconfig in $vms){
 
     }
 
+    # Switch to the destination subscription
+    Write-Output "Switching to destination subscription: $destsubId"
+    Select-AzSubscription -SubscriptionId $destsubId
+
 
     foreach($nicCollectionItem in $nicCollection){
 
@@ -442,14 +453,14 @@ foreach($vmconfig in $vms){
         foreach($ipconfigSettingsCollection in $nicCollectionItem.IpConfigurations){
 
             if($ipconfigSettingsCollection.Primary -eq $true){
-                $ipSettingsCreate = New-AzNetworkInterfaceIpConfig -Name $ipconfigSettingsCollection.Name -Subnet $ipconfigSettingsCollection.Subnet -Primary -PrivateIpAddress $ipconfigSettingsCollection.PrivateIpAddress -PrivateIpAddressVersion $ipconfigSettingsCollection.PrivateIpAddressVersion
+                $ipSettingsCreate += New-AzNetworkInterfaceIpConfig -Name $ipconfigSettingsCollection.Name -Subnet $ipconfigSettingsCollection.Subnet -Primary -PrivateIpAddress $ipconfigSettingsCollection.PrivateIpAddress -PrivateIpAddressVersion $ipconfigSettingsCollection.PrivateIpAddressVersion
             }
             elseif($ipconfigSettingsCollection.Primary -eq $false){
-                $ipSettingsCreate = New-AzNetworkInterfaceIpConfig -Name $ipconfigSettingsCollection.Name -Subnet $ipconfigSettingsCollection.Subnet -PrivateIpAddress $ipconfigSettingsCollection.PrivateIpAddress -PrivateIpAddressVersion $ipconfigSettingsCollection.PrivateIpAddressVersion
+                $ipSettingsCreate += New-AzNetworkInterfaceIpConfig -Name $ipconfigSettingsCollection.Name -Subnet $ipconfigSettingsCollection.Subnet -PrivateIpAddress $ipconfigSettingsCollection.PrivateIpAddress -PrivateIpAddressVersion $ipconfigSettingsCollection.PrivateIpAddressVersion
             }
         }
 
-        $nicCreate = New-AzNetworkInterface -Name "new$($nicCollectionItem.name)" -ResourceGroupName $nicCollectionItem.rg -location $nicCollectionItem.location  -IpConfiguration $ipSettingsCreate #-SubnetId $nicCollectionItem.subnetId
+        $nicCreate = New-AzNetworkInterface -Name $nicCollectionItem.name -ResourceGroupName $nicCollectionItem.rg -location $nicCollectionItem.location  -IpConfiguration $ipSettingsCreate -force #-SubnetId $nicCollectionItem.subnetId
 
 
         $nicCreateCollection += [pscustomobject]@{
@@ -471,12 +482,12 @@ foreach($vmconfig in $vms){
     $osDiskIdFormat = $osDiskId -replace $diskName, $newDiskName
 
     $vmConfigCollection = [pscustomobject]@{
-        VMName = "new$($vmconfig.Name)"
+        VMName = $vmconfig.Name
         vmSize = $vmconfig.HardwareProfile.vmSize
-        computerName = "new$($vmconfig.Name)"
+        computerName = $vmconfig.Name
         securityTypeStnd = "Standard"
         managedDiskId = $osDiskIdFormat
-        createOption = $vmconfig.StorageProfile.OsDisk.CreateOption
+        createOption = "Attach" #$vmconfig.StorageProfile.OsDisk.CreateOption
     }
 
 
@@ -491,7 +502,7 @@ foreach($vmconfig in $vms){
     $OSTypeVersion = $vmconfig.StorageProfile.OsDisk.OsType
 
     $config = Set-AzVMOSDisk -VM $config -ManagedDiskId $vmConfigCollection.managedDiskId  -CreateOption $vmConfigCollection.createOption #-OSType $OSTypeVersion
-    $config.StorageProfile.OsDisk.OsType = $OSTypeVersion
+    $config.StorageProfile.OsDisk.OsType = $OSTypeVersion 
     
     foreach($datadiskref in $vmconfig.StorageProfile.DataDisks){
 
@@ -514,7 +525,7 @@ foreach($vmconfig in $vms){
             DiskSizeGB = $datadiskref.DiskSizeGB
             Lun = $datadiskref.Lun
             Caching = $datadiskref.Caching
-            CreateOption = $datadiskref.CreateOption
+            CreateOption = "Attach" #$datadiskref.CreateOption
             Id = $DataDiskIdFormat
         }
     }
@@ -524,26 +535,6 @@ foreach($vmconfig in $vms){
         $config = Set-AzVMDataDisk -Caching $dataDiskRefCollectionItem.Caching -Lun $dataDiskRefCollectionItem.Lun -VM $config
     }
 
-
-    #$config
-
-    
-    # #Key Vault Retrieve
-    # $keyvault= Get-AzKeyVault -VaultName $keyVaultName 
-    # $keyvaultId = $keyvault.ResourceId
-
-    # #Key Vault Secret
-    # $secretName = "$($vmConfigCollection.VMName)-admin-password"
-    # $secret = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $secretName
-    # $adminPassword = $secret.SecretValue
-    # $securePassword = ConvertTo-SecureString $adminPassword -AsPlainText -Force
-    # $adminCredential = New-Object System.Management.Automation.PSCredential ("localadmin", $securePassword)
-
-    # $linuxSecretName = "$($vmConfigCollection.VMName)-localadmin-ssh-private-key"
-    # $linuxSecret = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $linuxSecretName
-    # $linuxAdminPassword = $linuxSecret.SecretValue
-    # $linuxSecurePassword = ConvertTo-SecureString $linuxAdminPassword -AsPlainText -Force
-    # $linuxAdminCredential = New-Object System.Management.Automation.PSCredential ("localadmin", $linuxSecurePassword)
 
 
     #Boot Diagnostics
@@ -562,6 +553,15 @@ foreach($vmconfig in $vms){
 
     #VM Creation 
     New-AzVM @vmParams
+
+
+    $nicCollection = @()
+    $vmConfigCollection = @()
+    $ipConfigCollection = @()
+    $dataDiskRefCollection = @()
+    $subnet = @()
+    $config = @()
+    $ipConfigurations =@()
+    $nicCreateCollection = @()
+
 }
-
-
