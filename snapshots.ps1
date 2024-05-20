@@ -1,3 +1,22 @@
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$sourceKeyVaultName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$destKeyVaultName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$sourceSubId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$destSubId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$location
+)
+
+
+
 
 $osDisksCollection = @()
 $rgCollection =@()
@@ -21,14 +40,9 @@ $sqlDBVMs = @()
 
 
 $secretCollection = @()
+$certificateCollection = @()
 
-$sourceKeyVaultName = ""
-$destKeyVaultName = ""
 
-$sourceSubId = ""
-$destSubId = ""
-
-$location = ""
 
 
 #Connect to Account
@@ -126,30 +140,56 @@ $sourceKeyvault= Get-AzKeyVault -VaultName $sourceKeyVaultName
 #Key Vault Secret Retrieve
 #$secrets = Get-AzKeyVaultSecret -ResourceId $sourceKeyvaultId | Select *
 $secretProperties= Get-AzKeyVaultSecret -VaultName $sourceKeyVaultName
+$certificateProperties = Get-AzKeyVaultSecret -VaultName $sourceKeyVaultName
 
 foreach($secret in $secretProperties){
+
 
     $secretfullProperties = Get-AzKeyVaultSecret -Vault $sourceKeyVaultName -Name $secret.Name
 
     $secretValue = $secretfullProperties.SecretValue
 
     $secretName = $secretfullProperties.Name
-
-    # if($secretfullProperties.Name -match "ra001" -or($secretfullProperties.Name -match "star-pasngr") -or($secretfullProperties.Name -match "ra002")){
-    #     $secretName = "$($secret.Name)-migrated" 
-    # }
-    # else {
-    #     $secretName = $secretfullProperties.Name
-    # }
-
-
-    $secretCollection += [PSCustomObject]@{
-        Name = $secretName #$secretfullProperties.Name
-        vaultName = $destKeyVaultName
-        secretValue = $secretValue
+    
+    if($secretName -notlike "*star*"){
+        $secretCollection += [PSCustomObject]@{
+            Name = $secretName #$secretfullProperties.Name
+            vaultName = $destKeyVaultName
+            secretValue = $secretValue
+        }
     }
+
+    
 }
 
+foreach($cert in $certificateProperties){
+
+    $certFullProperties = Get-AzKeyVaultSecret -Vault $sourceKeyVaultName -Name $cert.Name 
+
+    $certValue = $certFullProperties.SecretValue
+
+    $secretName = $certFullProperties.Name
+
+    if($secretName -like "*star*"){
+
+        
+
+        # if($secretfullProperties.Name -match "ra001" -or($secretfullProperties.Name -match "star-pasngr") -or($secretfullProperties.Name -match "ra002")){
+        #     $secretName = "$($secret.Name)-migrated" 
+        # }
+        # else {
+        #     $secretName = $secretfullProperties.Name
+        # }
+    
+
+        $certificateCollection += [PSCustomObject]@{
+            Name = "$($secretName)-migratedCert" #$secretfullProperties.Name
+            vaultName = $destKeyVaultName
+            certValue = $certValue
+        }
+    }
+
+}
 
 
 #Set context to dest sub
@@ -162,6 +202,11 @@ $destKeyVault = Get-AzKeyVault -VaultName $destKeyVaultName
 foreach($secretCollectionitem in $secretCollection){
     
     Set-AzKeyVaultSecret -VaultName $secretCollectionitem.vaultName -Name $secretCollectionitem.Name -SecretValue $secretCollectionitem.secretValue
+
+}
+
+foreach($certCollectionItem in $certificateCollection){
+    Set-AzKeyVaultSecret -VaultName $certCollectionItem.vaultName -Name $certCollectionItem.Name -SecretValue $certCollectionItem.certValue
 
 }
 
